@@ -1,6 +1,6 @@
 # TimeSaver
 
-Docker image to periodically save editions of the **De Tijd** newspaper to your Synology NAS.
+Docker image to periodically save pdf editions of the Belgian newspaper **De Tijd** to your Synology NAS.
 
 `Note: An active reader subscription is required to use this tool. Please ensure you comply with all relevant legal requirements.`
 
