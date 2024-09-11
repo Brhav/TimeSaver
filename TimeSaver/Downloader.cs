@@ -201,19 +201,6 @@ namespace TimeSaver
             return location;
         }
 
-        private string GetResume(string resumeUrl)
-        {
-            Console.WriteLine($"Getting resume...");
-
-            var response = _authHttpClient.GetAsync(resumeUrl).Result;
-
-            var location = response.Headers.Location!.ToString();
-
-            Console.WriteLine($"Getting resume complete");
-
-            return location;
-        }
-
         private ContentPackageDto[] GetContentPackageList(string regionValue)
         {
             Console.WriteLine("Getting content package list...");
@@ -304,6 +291,19 @@ namespace TimeSaver
             Console.WriteLine($"Getting publication pages ({publicationId}) complete");
 
             return result;
+        }
+
+        private string GetResume(string resumeUrl)
+        {
+            Console.WriteLine($"Getting resume...");
+
+            var response = _authHttpClient.GetAsync(resumeUrl).Result;
+
+            var location = response.Headers.Location!.ToString();
+
+            Console.WriteLine($"Getting resume complete");
+
+            return location;
         }
 
         private RequestDownloadDto GetRequestDownload(int userId, int sessionId, int subscriptionId, int contentPackageId, int orderId)
