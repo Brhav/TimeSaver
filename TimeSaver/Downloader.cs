@@ -1,6 +1,8 @@
 ﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Web;
 using TimeSaver.Models;
 using TimeSaver.Models.Responses;
 
@@ -8,16 +10,21 @@ namespace TimeSaver
 {
     public class Downloader
     {
-        private const string DEVICE = "webApp";
-        private const string ORIGIN = "https://krant.tijd.be";
+        private const string AUTH_BASE_URL = "https://auth.mediafin.be";
+        private const string BASE_URL = "https://krant.tijd.be";
 
+        private readonly HttpClient _authHttpClient;
         private readonly HttpClient _httpClient;
 
         public Downloader()
         {
-            _httpClient = new HttpClient();
+            _authHttpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
 
-            _httpClient.DefaultRequestHeaders.Add("Origin", ORIGIN);
+            _authHttpClient.DefaultRequestHeaders.Add("Origin", AUTH_BASE_URL);
+
+            _httpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+
+            _httpClient.DefaultRequestHeaders.Add("Origin", BASE_URL);
         }
 
         public void Run()
@@ -53,11 +60,25 @@ namespace TimeSaver
 
             var anonSession = GetOpenSession(0, uniqueId);
 
-            var validateSubscription = PostValidateSubscription(regionProfileValue.Value, settings.AccountEmailAddress, settings.AccountPassword, anonSession.SessionInfo.SessionId, anonSession.SessionInfo.UserId);
+            var authorizeLocation = GetAuthorize();
 
-            if (validateSubscription.Status == "SERVICE_FAILURE")
+            var loginUrl = AUTH_BASE_URL + authorizeLocation;
+
+            var resumeLocation = PostLogin(loginUrl, settings.AccountEmailAddress, settings.AccountPassword);
+
+            var resumeUrl = AUTH_BASE_URL + resumeLocation;
+
+            var codeUrl = GetResume(resumeUrl);
+
+            var queryParameters = HttpUtility.ParseQueryString(new Uri(codeUrl).Query);
+
+            var subscriptionToken = queryParameters["code"];
+
+            var validateSubscriptionToken = GetValidateSubscriptionToken(regionProfileValue.Value, anonSession.SessionInfo.SessionId, subscriptionToken!, anonSession.SessionInfo.UserId);
+
+            if (validateSubscriptionToken.Status == "SERVICE_FAILURE")
             {
-                Console.WriteLine($"Status is {validateSubscription.Status}");
+                Console.WriteLine($"Status is {validateSubscriptionToken.Status}");
 
                 return;
             }
@@ -82,7 +103,7 @@ namespace TimeSaver
                 {
                     var requestOrder = PostRequestOrder(contentPackagePublication.ContentPackageId, session.SessionInfo.SessionId, session.SessionInfo.UserId);
 
-                    var requestDownload = GetRequestDownload(session.SessionInfo.UserId, session.SessionInfo.SessionId, validateSubscription.SubscriptionId, contentPackagePublication.ContentPackageId, requestOrder.OrderId);
+                    var requestDownload = GetRequestDownload(session.SessionInfo.UserId, session.SessionInfo.SessionId, validateSubscriptionToken.SubscriptionId, contentPackagePublication.ContentPackageId, requestOrder.OrderId);
 
                     var confirmDownload = PostConfirmDownload(requestDownload.DownloadId, contentPackage.ContentPackageId, session.SessionInfo.SessionId, session.SessionInfo.UserId);
 
@@ -163,6 +184,34 @@ namespace TimeSaver
             stream.Result.CopyTo(fileStream);
 
             Console.WriteLine($"Downloading publication page ({publicationPageId}) complete");
+        }
+
+        private string GetAuthorize()
+        {
+            Console.WriteLine($"Getting authorize...");
+
+            var url = $"https://auth.mediafin.be/authorize?client_id=rtU2js35WJrI5rh5quuTceJGM1yDVFDF&response_type=code&ext-agency=tijd&ext-newspaper=true&ui_locales=nl&scope=offline_access&redirect_uri=https%3A%2F%2Fkrant.tijd.be";
+
+            var response = _authHttpClient.GetAsync(url).Result;
+
+            var location = response.Headers.Location!.ToString();
+
+            Console.WriteLine($"Getting authorize complete");
+
+            return location;
+        }
+
+        private string GetResume(string resumeUrl)
+        {
+            Console.WriteLine($"Getting resume...");
+
+            var response = _authHttpClient.GetAsync(resumeUrl).Result;
+
+            var location = response.Headers.Location!.ToString();
+
+            Console.WriteLine($"Getting resume complete");
+
+            return location;
         }
 
         private ContentPackageDto[] GetContentPackageList(string regionValue)
@@ -272,6 +321,21 @@ namespace TimeSaver
             return result;
         }
 
+        private ValidateSubscriptionTokenDto GetValidateSubscriptionToken(string downloadToken, int sessionId, string subscriptionToken, int userId)
+        {
+            Console.WriteLine("Getting validate subscription token...");
+
+            var url = $"https://mfn-tij-production-api.twipecloud.net/Session/SessionService.svc/json/ValidateSubscriptionToken?UserID={userId}&SessionID={sessionId}&subscriptionToken={subscriptionToken}&downloadToken={downloadToken}&subscriptionType=MFN";
+
+            var responseBody = _httpClient.GetStringAsync(url).Result;
+
+            var result = JsonConvert.DeserializeObject<ValidateSubscriptionTokenDto>(responseBody) ?? throw new InvalidOperationException();
+
+            Console.WriteLine("Getting validate subscription token complete");
+
+            return result;
+        }
+
         private ConfirmDownloadDto PostConfirmDownload(int downloadId, int publicationId, int sessionId, int userId)
         {
             Console.WriteLine("Posting confirm download...");
@@ -284,7 +348,7 @@ namespace TimeSaver
 
             var postBody = new Models.Requests.ConfirmDownloadDto
             {
-                Device = DEVICE,
+                Device = "webApp",
                 DownloadId = downloadId,
                 DownloadPublicationStatusHistory = new Models.Requests.DownloadPublicationStatusHistoryDto
                 {
@@ -311,6 +375,33 @@ namespace TimeSaver
             return result;
         }
 
+        private string PostLogin(string loginUrl, string userName, string password)
+        {
+            Console.WriteLine("Posting login...");
+
+            var queryParameters = HttpUtility.ParseQueryString(new Uri(loginUrl).Query);
+
+            var postBody = new Models.Requests.LoginDto
+            {
+                Action = "default",
+                Password = password,
+                State = queryParameters["state"]!,
+                Username = userName
+            };
+
+            var serializerSettings = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
+
+            var content = new StringContent(JsonConvert.SerializeObject(postBody, serializerSettings), Encoding.UTF8, "application/json");
+
+            var response = _authHttpClient.PostAsync(loginUrl, content).Result;
+
+            var location = response.Headers.Location!.ToString();
+
+            Console.WriteLine("Posting login complete");
+
+            return location;
+        }
+
         private RequestOrderDto PostRequestOrder(int contentPackageId, int sessionId, int userId)
         {
             Console.WriteLine("Posting request order...");
@@ -320,7 +411,7 @@ namespace TimeSaver
             var postBody = new Models.Requests.RequestOrderDto
             {
                 ContentPackageId = contentPackageId,
-                Device = DEVICE,
+                Device = "webApp",
                 PaymentMethod = "Subscription",
                 SessionId = sessionId,
                 UserId = userId,
@@ -334,35 +425,6 @@ namespace TimeSaver
             var result = JsonConvert.DeserializeObject<RequestOrderDto>(responseBody) ?? throw new InvalidOperationException();
 
             Console.WriteLine("Posting request order complete");
-
-            return result;
-        }
-
-        private ValidateSubscriptionDto PostValidateSubscription(string downloadToken, string email, string password, int sessionId, int userId)
-        {
-            Console.WriteLine("Posting validate subscription...");
-
-            var url = "https://mfn-tij-production-api.twipecloud.net/Session/SessionService.svc/json/Validate_Subscription";
-
-            var postBody = new Models.Requests.ValidateSubscriptionDto
-            {
-                Device = DEVICE,
-                DownloadToken = downloadToken,
-                Email = email,
-                Password = password,
-                SessionId = sessionId,
-                SubscriptionType = "MFN",
-                UserId = userId,
-                Version = "1.0.0.0"
-            };
-
-            var content = new StringContent(JsonConvert.SerializeObject(postBody), Encoding.UTF8, "application/json");
-
-            var responseBody = _httpClient.PostAsync(url, content).Result.Content.ReadAsStringAsync().Result;
-
-            var result = JsonConvert.DeserializeObject<ValidateSubscriptionDto>(responseBody) ?? throw new InvalidOperationException();
-
-            Console.WriteLine("Posting validate subscription complete");
 
             return result;
         }

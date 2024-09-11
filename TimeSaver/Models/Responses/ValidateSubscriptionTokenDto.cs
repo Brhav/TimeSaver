@@ -1,6 +1,6 @@
 ﻿namespace TimeSaver.Models.Responses
 {
-    public class ValidateSubscriptionDto
+    public class ValidateSubscriptionTokenDto
     {
         public string Status { get; set; } = null!;
 
