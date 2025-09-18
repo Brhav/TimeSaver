@@ -62,11 +62,15 @@ namespace TimeSaver
 
             var authorizeLocation = GetAuthorize();
 
-            var loginUrl = AUTH_BASE_URL + authorizeLocation;
+            var loginIdentifierUrl = AUTH_BASE_URL + authorizeLocation;
 
-            var resumeLocation = PostLogin(loginUrl, settings.AccountEmailAddress, settings.AccountPassword);
+            var loginIdentifierLocation = PostLoginIdentifier(loginIdentifierUrl, settings.AccountEmailAddress);
 
-            var resumeUrl = AUTH_BASE_URL + resumeLocation;
+            var loginPasswordUrl = AUTH_BASE_URL + loginIdentifierLocation;
+
+            var loginPasswordLocation = PostLoginPassword(loginPasswordUrl, settings.AccountEmailAddress, settings.AccountPassword);
+
+            var resumeUrl = AUTH_BASE_URL + loginPasswordLocation;
 
             var codeUrl = GetResume(resumeUrl);
 
@@ -375,15 +379,43 @@ namespace TimeSaver
             return result;
         }
 
-        private string PostLogin(string loginUrl, string userName, string password)
+        private string PostLoginIdentifier(string loginIdentifierUrl, string userName)
         {
-            Console.WriteLine("Posting login...");
+            Console.WriteLine("Posting login identifier...");
 
-            var queryParameters = HttpUtility.ParseQueryString(new Uri(loginUrl).Query);
+            var queryParameters = HttpUtility.ParseQueryString(new Uri(loginIdentifierUrl).Query);
 
-            var postBody = new Models.Requests.LoginDto
+            var postBody = new Models.Requests.LoginIdentifierDto
             {
-                Action = "default",
+                IsBrave = "false",
+                JsAvailable = "true",
+                State = queryParameters["state"]!,
+                Username = userName,
+                WebauthnAvailable = "true",
+                WebauthnPlatformAvailable = "false"
+            };
+
+            var serializerSettings = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
+
+            var content = new StringContent(JsonConvert.SerializeObject(postBody, serializerSettings), Encoding.UTF8, "application/json");
+
+            var response = _authHttpClient.PostAsync(loginIdentifierUrl, content).Result;
+
+            var location = response.Headers.Location!.ToString();
+
+            Console.WriteLine("Posting login identifier complete");
+
+            return location;
+        }
+
+        private string PostLoginPassword(string loginPasswordUrl, string userName, string password)
+        {
+            Console.WriteLine("Posting login password...");
+
+            var queryParameters = HttpUtility.ParseQueryString(new Uri(loginPasswordUrl).Query);
+
+            var postBody = new Models.Requests.LoginPasswordDto
+            {
                 Password = password,
                 State = queryParameters["state"]!,
                 Username = userName
@@ -393,11 +425,11 @@ namespace TimeSaver
 
             var content = new StringContent(JsonConvert.SerializeObject(postBody, serializerSettings), Encoding.UTF8, "application/json");
 
-            var response = _authHttpClient.PostAsync(loginUrl, content).Result;
+            var response = _authHttpClient.PostAsync(loginPasswordUrl, content).Result;
 
             var location = response.Headers.Location!.ToString();
 
-            Console.WriteLine("Posting login complete");
+            Console.WriteLine("Posting login password complete");
 
             return location;
         }
